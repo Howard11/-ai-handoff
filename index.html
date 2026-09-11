@@ -212,6 +212,24 @@
 <div class="current-bar" id="currentBar"></div>
 
 <div class="settings-panel" id="settingsPanel">
+  <h3 id="claudeKeyHeading">Anthropic (Claude) 金鑰</h3>
+  <div class="settings-grid" id="claudeKeyBlock">
+    <div>
+      <div class="settings-field">
+        <label>Anthropic API Key</label>
+        <input type="password" id="claudeKeyInput" placeholder="sk-ant-...">
+      </div>
+      <div class="settings-field">
+        <label>Claude 模型名稱</label>
+        <input type="text" id="claudeModelInput" placeholder="例如 claude-sonnet-5">
+      </div>
+    </div>
+    <div class="settings-note" style="align-self:center;">
+      在 Claude.ai 預覽環境裡不需要填這個，會自動用內建的免金鑰管道。
+      只有架到 GitHub Pages 等外部網址時才需要在這裡貼上你自己的 Anthropic API Key。
+    </div>
+  </div>
+
   <h3>OpenAI / Google 金鑰</h3>
   <div class="settings-grid">
     <div>
@@ -280,7 +298,8 @@ function defaultState(){
       chatgpt: { name: 'ChatGPT', accounts: [{id: uid(), label:'帳號 A', status:'ok', active:true}] },
       gemini: { name: 'Gemini', accounts: [{id: uid(), label:'帳號 A', status:'ok', active:true}] }
     },
-    settings: { openaiKey:'', openaiModel:'gpt-4o', geminiKey:'', geminiModel:'gemini-2.5-flash',
+    settings: { claudeKey:'', claudeModel:'claude-sonnet-5',
+      openaiKey:'', openaiModel:'gpt-4o', geminiKey:'', geminiModel:'gemini-2.5-flash',
       googleClientId:'', googleEmail:'', googleName:'' },
     projects: [],
     selectedProjectId: null
@@ -339,9 +358,15 @@ async function loadState(){
   }
   document.getElementById('openaiKeyInput').value = state.settings.openaiKey || '';
   document.getElementById('openaiModelInput').value = state.settings.openaiModel || 'gpt-4o';
+  document.getElementById('claudeKeyInput').value = state.settings.claudeKey || '';
+  document.getElementById('claudeModelInput').value = state.settings.claudeModel || 'claude-sonnet-5';
   document.getElementById('geminiKeyInput').value = state.settings.geminiKey || '';
   document.getElementById('geminiModelInput').value = state.settings.geminiModel || 'gemini-2.5-flash';
   document.getElementById('googleClientIdInput').value = state.settings.googleClientId || '';
+  if (hasClaudeStorage){
+    document.getElementById('claudeKeyBlock').style.display = 'none';
+    document.getElementById('claudeKeyHeading').textContent = 'Anthropic (Claude) 金鑰 — 此環境不需要';
+  }
   render();
   renderGoogleStatus();
   initGoogleSignIn();
@@ -459,8 +484,10 @@ function renderCurrentBar(){
 document.getElementById('settingsToggle').addEventListener('click', () => {
   document.getElementById('settingsPanel').classList.toggle('show');
 });
-['openaiKeyInput','openaiModelInput','geminiKeyInput','geminiModelInput'].forEach(id => {
+['claudeKeyInput','claudeModelInput','openaiKeyInput','openaiModelInput','geminiKeyInput','geminiModelInput'].forEach(id => {
   document.getElementById(id).addEventListener('input', e => {
+    if(id==='claudeKeyInput') state.settings.claudeKey = e.target.value;
+    if(id==='claudeModelInput') state.settings.claudeModel = e.target.value;
     if(id==='openaiKeyInput') state.settings.openaiKey = e.target.value;
     if(id==='openaiModelInput') state.settings.openaiModel = e.target.value;
     if(id==='geminiKeyInput') state.settings.geminiKey = e.target.value;
@@ -688,7 +715,9 @@ function renderProjDetail(){
   wsBox.appendChild(provRow);
   const hint = document.createElement('div');
   hint.className = 'model-hint';
-  if (proj.provider === 'claude') hint.textContent = '模型：claude-sonnet-4-6（內建，不需金鑰）';
+  if (proj.provider === 'claude') hint.textContent = hasClaudeStorage
+    ? '模型：claude-sonnet-4-6（內建，不需金鑰）'
+    : `模型：${state.settings.claudeModel || '(尚未設定)'} — 需在右上角設定 Anthropic API Key`;
   if (proj.provider === 'openai') hint.textContent = `模型：${state.settings.openaiModel || '(尚未設定)'} — 需在右上角設定 API Key`;
   if (proj.provider === 'gemini') hint.textContent = `模型：${state.settings.geminiModel || '(尚未設定)'} — 需在右上角設定 API Key`;
   wsBox.appendChild(hint);
@@ -939,11 +968,35 @@ async function callProvider(proj){
 }
 
 async function callClaude(sys, history){
+  if (hasClaudeStorage){
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        system: sys,
+        messages: history
+      })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message || 'Claude API 錯誤');
+    const textBlock = (data.content || []).find(c => c.type === 'text');
+    return textBlock ? textBlock.text : '(沒有收到文字回覆)';
+  }
+  const key = state.settings.claudeKey;
+  if (!key) throw new Error('尚未設定 Anthropic API Key（請到右上角設定填入）');
+  const model = state.settings.claudeModel || 'claude-sonnet-5';
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: model,
       max_tokens: 1000,
       system: sys,
       messages: history
