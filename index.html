@@ -290,6 +290,25 @@ function defaultState(){
 let state = defaultState();
 let saveTimer = null;
 
+/* ---------- storage adapter: Claude.ai persistent storage, or localStorage fallback ---------- */
+const hasClaudeStorage = typeof window.storage !== 'undefined' && window.storage;
+
+async function storageGet(key){
+  if (hasClaudeStorage){
+    return await window.storage.get(key, false);
+  }
+  const raw = localStorage.getItem(key);
+  return raw ? { key, value: raw, shared: false } : null;
+}
+
+async function storageSet(key, value){
+  if (hasClaudeStorage){
+    return await window.storage.set(key, value, false);
+  }
+  localStorage.setItem(key, value);
+  return { key, value, shared: false };
+}
+
 function scheduleSave(){
   const ind = document.getElementById('saveIndicator');
   ind.textContent = '儲存中…';
@@ -297,8 +316,8 @@ function scheduleSave(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(state), false);
-      ind.textContent = '已同步';
+      await storageSet(STORAGE_KEY, JSON.stringify(state));
+      ind.textContent = hasClaudeStorage ? '已同步' : '已存在此瀏覽器';
       ind.classList.remove('saving');
     } catch(e){
       ind.textContent = '儲存失敗，稍後重試';
@@ -309,7 +328,7 @@ function scheduleSave(){
 
 async function loadState(){
   try {
-    const res = await window.storage.get(STORAGE_KEY, false);
+    const res = await storageGet(STORAGE_KEY);
     if (res && res.value) {
       const parsed = JSON.parse(res.value);
       state = Object.assign(defaultState(), parsed);
